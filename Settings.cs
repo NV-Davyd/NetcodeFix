@@ -33,11 +33,14 @@ namespace NetcodeFix
 
         // ── Tier 1: sanity filter on incoming packets ──────────────────────
         // Reject any incoming packet whose implied speed exceeds this many
-        // m/s relative to the previous frame. ~80 m/s = 288 km/h, above any
-        // legitimate car. Catches teleport-grade packet corruption / massive
-        // lag jumps. Setting too low causes legitimate-but-stretched updates
-        // to be dropped, making cars stutter when ping spikes.
-        public float maxImpliedSpeedMps = 80f;
+        // m/s relative to the previous frame.
+        //
+        // Empirically: 80 m/s rejected ~1000+ legitimate frames per session
+        // in busy rooms (timing jitter on the modelTime stamping can make
+        // a legitimate-but-quick-arriving packet pair look fast). 150 m/s
+        // (~540 km/h) is safely above any real drift car at sane jitter
+        // levels while still catching teleport-grade corruption.
+        public float maxImpliedSpeedMps = 150f;
 
         // Track how often we reject — visible in the UI for tuning.
         [NonSerialized] public int rejectedFramesThisSession;

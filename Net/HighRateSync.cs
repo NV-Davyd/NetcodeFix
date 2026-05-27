@@ -43,11 +43,26 @@ namespace NetcodeFix.Net
         private long  _framesReceived;
         private long  _framesInjected;
         private long  _framesDropped;
+        // Per-reason drop counters (diagnostic). Sum to _framesDropped.
+        private long  _dropSelf;
+        private long  _dropSchema;
+        private long  _dropNoPosSystem;
+        private long  _dropNoPosInfo;
+        private long  _dropException;
+
+        // True while WE are calling AddData from our own inject path.
+        // Read by the sanity filter (InterpolatorPatch) so it can bypass
+        // for modded-peer frames we already trust.
+        [System.ThreadStatic] private static bool _injectingTrusted;
+        public static bool IsInjectingTrusted => _injectingTrusted;
 
         public bool   IsActive     => _ready && Settings.Current.tier2InputHistory;
         public long   FramesSent   => _framesSent;
+        public long   FramesRecv   => _framesReceived;
         public long   FramesInject => _framesInjected;
         public long   FramesDrop   => _framesDropped;
+        public string DropReasonBreakdown =>
+            $"self={_dropSelf} schema={_dropSchema} noPosSys={_dropNoPosSystem} noPosInfo={_dropNoPosInfo} exc={_dropException}";
 
         // Reflection — find NetGameSyncPosSystem instance + private fields
         // for fast per-frame access during inject path.
@@ -177,6 +192,10 @@ namespace NetcodeFix.Net
         }
 
         // ── Receive ────────────────────────────────────────────────────────
+        // Note: Kino.Sync.SendToAll delivers to self too (confirmed by
+        // NoDynCollisions' presence handler explicitly filtering self).
+        // We drop self-delivered packets at the top to save a lookup and
+        // avoid double-feeding our own car's interpolator.
         private void OnReceive(IPacket packet)
         {
             if (packet.Id != _packetId) return;
@@ -185,56 +204,73 @@ namespace NetcodeFix.Net
             // Even if the feature is "off" locally, accept frames — the
             // remote side might still be broadcasting. The IsActive check
             // gates BROADCAST, not RECEIVE.
-            if (!_ready) { _framesDropped++; return; }
+            if (!_ready) { _framesDropped++; _dropException++; return; }
 
             try
             {
                 if (!SyncPacketCodec.TryReadPoseFrame(packet, out int senderId, out var frame))
                 {
-                    _framesDropped++;
+                    _framesDropped++; _dropSchema++;
                     return;
                 }
 
-                if (!InjectIntoInterpolator(senderId, ref frame))
-                    _framesDropped++;
-                else
-                    _framesInjected++;
+                // Skip self-loopback. Our own car's state was just captured
+                // and sent — re-injecting it into our own interpolator is
+                // wasted work and triggers the sanity filter spuriously.
+                int localId = NetworkController.InstanceGame?.LocalPlayer?.NetworkID ?? -1;
+                if (senderId == localId)
+                {
+                    _framesDropped++; _dropSelf++;
+                    return;
+                }
+
+                var reason = InjectIntoInterpolator(senderId, ref frame);
+                if (reason == InjectResult.Ok) { _framesInjected++; return; }
+
+                _framesDropped++;
+                if (reason == InjectResult.NoPosSystem) _dropNoPosSystem++;
+                else if (reason == InjectResult.NoPosInfo) _dropNoPosInfo++;
             }
             catch (Exception ex)
             {
-                _framesDropped++;
+                _framesDropped++; _dropException++;
                 Kino.Log.Warning("[NetcodeFix] HighRateSync OnReceive failed: " + ex.Message);
             }
         }
 
+        private enum InjectResult { Ok, NoPosSystem, NoPosInfo }
+
         // Finds the sender's PosSyncInfo by their NetworkID, then feeds the
         // received frame into their interpolator buffer. Same code path the
         // game's HandleAsync uses, just from a different packet source.
-        private static bool InjectIntoInterpolator(int senderNetworkId, ref PosDataFrame frame)
+        private static InjectResult InjectIntoInterpolator(int senderNetworkId, ref PosDataFrame frame)
         {
-            if (_syncInfosField == null) return false;
-
-            // Find the NetGameSyncPosSystem instance via the live game's
-            // systems manager. We can't easily cache this because it can
-            // be torn down/recreated on disconnect/reconnect.
             var posSystem = FindPosSystem();
-            if (posSystem == null) return false;
+            if (posSystem == null) return InjectResult.NoPosSystem;
 
-            // Use the public TryGetRAWInfo accessor — avoids one more
-            // reflection hop and matches what the game does internally.
-            if (!posSystem.TryGetRAWInfo(senderNetworkId, out var posInfo)) return false;
-            if (posInfo?.interpolator == null) return false;
+            if (!posSystem.TryGetRAWInfo(senderNetworkId, out var posInfo)) return InjectResult.NoPosInfo;
+            if (posInfo?.interpolator == null) return InjectResult.NoPosInfo;
 
-            // Mark as not-extrapolated origin so smoothing logic treats
-            // it like any other authoritative frame.
-            posInfo.interpolator.AddData(ref frame);
+            // Set the trusted-inject flag so the sanity-filter prefix
+            // skips this AddData call — we already trust frames received
+            // from a verified modded peer over Kino.Sync.
+            _injectingTrusted = true;
+            try
+            {
+                posInfo.interpolator.AddData(ref frame);
+            }
+            finally
+            {
+                _injectingTrusted = false;
+            }
             posInfo.lastTimeUpdated = frame.modelTime;
             posInfo.isSyncDirty = true; // make the next sync pull from the new buffer state
-            return true;
+            return InjectResult.Ok;
         }
 
-        // Walk the network systems list to find NetGameSyncPosSystem.
-        // Cached after first successful lookup to avoid the linear scan.
+        // NetworkGame.systems is a public property, NetGameSystemsManager.Get<T>
+        // is a public generic method. No reflection — direct typed call. Cached
+        // because the systems manager doesn't change while in a room.
         private static NetGameSyncPosSystem _cachedPosSystem;
         private static NetGameSyncPosSystem FindPosSystem()
         {
@@ -242,25 +278,14 @@ namespace NetcodeFix.Net
 
             try
             {
-                // Walk via NetworkController → InstanceGame → SystemsManager
                 var game = NetworkController.InstanceGame;
-                if (game == null) return null;
-
-                var systemsField = AccessTools.Field(game.GetType(), "m_systems")
-                                   ?? AccessTools.Field(game.GetType(), "systems")
-                                   ?? AccessTools.Field(game.GetType(), "SystemsManager");
-                if (systemsField == null) return null;
-                var systemsObj = systemsField.GetValue(game);
-                if (systemsObj == null) return null;
-
-                // NetGameSystemsManager has a Get<T> method we can call.
-                var getMethod = systemsObj.GetType().GetMethod("Get")?.MakeGenericMethod(typeof(NetGameSyncPosSystem));
-                if (getMethod != null)
-                {
-                    _cachedPosSystem = getMethod.Invoke(systemsObj, null) as NetGameSyncPosSystem;
-                }
+                if (game?.systems == null) return null;
+                _cachedPosSystem = game.systems.Get<NetGameSyncPosSystem>();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Kino.Log.Warning("[NetcodeFix] FindPosSystem failed: " + ex.Message);
+            }
 
             return _cachedPosSystem;
         }

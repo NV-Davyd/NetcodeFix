@@ -53,7 +53,7 @@ namespace NetcodeFix
                     $"Snap threshold (vanilla = 6m):  {s.snapThresholdMetres:F1} m"))
                 Settings.Save();
 
-            if (Kino.UI.Slider(ref s.maxImpliedSpeedMps, 40f, 200f,
+            if (Kino.UI.Slider(ref s.maxImpliedSpeedMps, 60f, 300f,
                     $"Sanity reject above:  {s.maxImpliedSpeedMps:F0} m/s"))
                 Settings.Save();
 
@@ -70,8 +70,10 @@ namespace NetcodeFix
                 s.tier2InputHistory = t2a; Settings.Save();
             }
             Kino.UI.Label("  Sent: " + _highRateSync.FramesSent
-                       + "    Injected (received from peers): " + _highRateSync.FramesInject
+                       + "    Recv: " + _highRateSync.FramesRecv
+                       + "    Injected: " + _highRateSync.FramesInject
                        + "    Dropped: " + _highRateSync.FramesDrop);
+            Kino.UI.Label("  Drop reasons: " + _highRateSync.DropReasonBreakdown);
 
             bool t2b = s.tier2UploadRateBoost;
             if (Kino.UI.Toggle("Boost local upload rate to 50Hz (vanilla 30Hz)", ref t2b))

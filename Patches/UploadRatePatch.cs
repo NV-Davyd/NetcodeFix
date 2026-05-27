@@ -61,23 +61,15 @@ namespace NetcodeFix.Patches
             }
         }
 
-        // Tiny wrapper so we don't need to expose HighRateSync's private
-        // cache field. Re-implements the same lookup with the same fallback
-        // logic — kept in sync with HighRateSync.FindPosSystem manually.
+        // Direct typed lookup — no reflection. NetworkGame.systems is a
+        // public property; NetGameSystemsManager.Get<T> is a public generic.
         private static NetGameSyncPosSystem HighRateSync_FindPosSystem()
         {
             try
             {
                 var game = NetworkController.InstanceGame;
-                if (game == null) return null;
-                var systemsField = AccessTools.Field(game.GetType(), "m_systems")
-                                   ?? AccessTools.Field(game.GetType(), "systems")
-                                   ?? AccessTools.Field(game.GetType(), "SystemsManager");
-                if (systemsField == null) return null;
-                var systemsObj = systemsField.GetValue(game);
-                if (systemsObj == null) return null;
-                var getMethod = systemsObj.GetType().GetMethod("Get")?.MakeGenericMethod(typeof(NetGameSyncPosSystem));
-                return getMethod?.Invoke(systemsObj, null) as NetGameSyncPosSystem;
+                if (game?.systems == null) return null;
+                return game.systems.Get<NetGameSyncPosSystem>();
             }
             catch { return null; }
         }

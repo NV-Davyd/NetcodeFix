@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using KSL.API;
+using NetcodeFix.Net;
 using SyncMultiplayer;
 using UnityEngine;
 
@@ -36,6 +37,13 @@ namespace NetcodeFix.Patches
         {
             if (!Settings.Current.enabled) return true;
             if (F_data == null || F_current == null || F_count == null) return true;
+
+            // Trust bypass: HighRateSync sets this flag while injecting
+            // frames received from verified modded peers. Skip the sanity
+            // check for those — they come from a trusted source over a
+            // separate channel, and we don't want our own supplemental
+            // frames being filtered.
+            if (HighRateSync.IsInjectingTrusted) return true;
 
             try
             {
