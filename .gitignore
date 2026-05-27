@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+build/
+
+# IDE
+*.user
+*.suo
+.vs/
+.idea/
+.vscode/
+
+# OS noise
+Thumbs.db
+.DS_Store
+
+# Local runtime config
+netcodefix.json
+
+# maykr key file — never commit
+*.kmc
