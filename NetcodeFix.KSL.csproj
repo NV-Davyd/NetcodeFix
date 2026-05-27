@@ -23,6 +23,10 @@
       <HintPath>D:\SteamLibrary\steamapps\common\CarX Drift Racing Online\Drift Racing Online_Data\Managed\CarX.Plugins.Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="CarX.Extras.Surface">
+      <HintPath>D:\SteamLibrary\steamapps\common\CarX Drift Racing Online\Drift Racing Online_Data\Managed\CarX.Extras.Surface.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="netstandard">
       <HintPath>D:\SteamLibrary\steamapps\common\CarX Drift Racing Online\Drift Racing Online_Data\Managed\netstandard.dll</HintPath>
       <Private>false</Private>
@@ -41,6 +45,10 @@
     </Reference>
     <Reference Include="UnityEngine.PhysicsModule">
       <HintPath>D:\SteamLibrary\steamapps\common\CarX Drift Racing Online\Drift Racing Online_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Jobs">
+      <HintPath>D:\SteamLibrary\steamapps\common\CarX Drift Racing Online\Drift Racing Online_Data\Managed\Unity.Jobs.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

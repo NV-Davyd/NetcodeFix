@@ -42,8 +42,22 @@ namespace NetcodeFix.Net
             ContactArbiter   = 1u << 4,  // Tier 3 — not yet implemented
         }
 
-        // What WE support. Bumped as features land.
-        private const Caps LocalCaps = Caps.Tier1Smoothing | Caps.SanityFilter;
+        // What WE support. Tier 1 caps are unconditional (the patches are
+        // installed at Start and can't be disabled mid-session without an
+        // unload). Tier 2/3 caps depend on whether the user has those
+        // features turned on in settings — so we'd lie to peers if we
+        // advertised them when they're off. Property, not constant.
+        private static Caps LocalCaps
+        {
+            get
+            {
+                Caps c = Caps.Tier1Smoothing | Caps.SanityFilter;
+                if (Settings.Current.tier2InputHistory)    c |= Caps.InputHistory;
+                if (Settings.Current.tier2UploadRateBoost) c |= Caps.UploadRateBoost;
+                if (Settings.Current.tier3ContactArbitration) c |= Caps.ContactArbiter;
+                return c;
+            }
+        }
 
         private bool  _ready;
         private int   _packetId = -1;

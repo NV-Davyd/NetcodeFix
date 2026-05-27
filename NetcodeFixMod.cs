@@ -4,6 +4,7 @@ using HarmonyLib;
 using KSL.API;
 using NetcodeFix.Net;
 using NetcodeFix.Patches;
+using SyncMultiplayer;
 using UnityEngine;
 
 namespace NetcodeFix
@@ -32,8 +33,10 @@ namespace NetcodeFix
         private static bool _patched;
         private static string _status = "Starting.";
 
-        private PeerPresence _presence;
-        private SettingsUI   _settingsUi;
+        private PeerPresence   _presence;
+        private SettingsUI     _settingsUi;
+        private HighRateSync   _highRateSync;
+        private ContactArbiter _contactArbiter;
 
         // ── Lifecycle ──────────────────────────────────────────────────────
         private void Start()
@@ -44,7 +47,11 @@ namespace NetcodeFix
                 ApplyHarmonyPatches();
                 _presence = new PeerPresence();
                 _presence.Initialize();
-                _settingsUi = new SettingsUI(_presence);
+                _highRateSync = new HighRateSync(_presence);
+                _highRateSync.Initialize();
+                _contactArbiter = new ContactArbiter(_presence);
+                _contactArbiter.Initialize();
+                _settingsUi = new SettingsUI(_presence, _highRateSync, _contactArbiter);
 
                 _status = "Active. Tier 1 patches loaded.";
                 Kino.Log.Info("[NetcodeFix] Loaded v" + Version);
@@ -59,6 +66,20 @@ namespace NetcodeFix
         private void Update()
         {
             _presence?.Tick();
+            _highRateSync?.Tick();
+            UploadRatePatch.Tick(_presence);
+
+            // Reset cached pos-system reference on disconnect so we re-resolve
+            // when rejoining a room.
+            if (NetworkController.InstanceGame == null)
+                HighRateSync.ResetCache();
+        }
+
+        // Tier 3's proximity-based collision detection runs at physics rate.
+        // BaseMod inherits MonoBehaviour, so Unity wires this up naturally.
+        private void FixedUpdate()
+        {
+            _contactArbiter?.FixedTick();
         }
 
         private void OnDestroy()
@@ -70,6 +91,8 @@ namespace NetcodeFix
                     Harmony.UnpatchSelf();
                     _patched = false;
                 }
+                _contactArbiter?.Shutdown();
+                _highRateSync?.Shutdown();
                 _presence?.Shutdown();
                 Settings.Save();
                 _status = "Unloaded.";

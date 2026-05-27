@@ -9,11 +9,15 @@ namespace NetcodeFix
     // changed this frame — cleaner than approximate-equals comparison.
     public sealed class SettingsUI
     {
-        private readonly PeerPresence _presence;
+        private readonly PeerPresence   _presence;
+        private readonly HighRateSync   _highRateSync;
+        private readonly ContactArbiter _contactArbiter;
 
-        public SettingsUI(PeerPresence presence)
+        public SettingsUI(PeerPresence presence, HighRateSync highRateSync, ContactArbiter contactArbiter)
         {
-            _presence = presence;
+            _presence       = presence;
+            _highRateSync   = highRateSync;
+            _contactArbiter = contactArbiter;
         }
 
         public void Draw()
@@ -57,26 +61,41 @@ namespace NetcodeFix
 
             Kino.UI.HorizontalLine();
 
-            // ── Tier 2/3 placeholders ──────────────────────────────────────
-            Kino.UI.GroupLabel("Tier 2 / 3 — pending implementation");
+            // ── Tier 2: supplemental high-rate sync ────────────────────────
+            Kino.UI.GroupLabel("Tier 2 — modded-room only (auto-disables in vanilla rooms)");
 
             bool t2a = s.tier2InputHistory;
-            if (Kino.UI.Toggle("[stub] Tier 2: Input history broadcast", ref t2a))
+            if (Kino.UI.Toggle("High-rate pose broadcast (50Hz via Kino.Sync)", ref t2a))
             {
                 s.tier2InputHistory = t2a; Settings.Save();
             }
+            Kino.UI.Label("  Sent: " + _highRateSync.FramesSent
+                       + "    Injected (received from peers): " + _highRateSync.FramesInject
+                       + "    Dropped: " + _highRateSync.FramesDrop);
 
             bool t2b = s.tier2UploadRateBoost;
-            if (Kino.UI.Toggle("[stub] Tier 2: 50Hz upload-rate boost", ref t2b))
+            if (Kino.UI.Toggle("Boost local upload rate to 50Hz (vanilla 30Hz)", ref t2b))
             {
                 s.tier2UploadRateBoost = t2b; Settings.Save();
             }
 
+            Kino.UI.HorizontalLine();
+
+            // ── Tier 3: contact arbitration ────────────────────────────────
+            Kino.UI.GroupLabel("Tier 3 — modded-room only");
+
             bool t3 = s.tier3ContactArbitration;
-            if (Kino.UI.Toggle("[stub] Tier 3: Contact arbitration", ref t3))
+            if (Kino.UI.Toggle("Contact arbitration (deterministic impulse on both sides)", ref t3))
             {
                 s.tier3ContactArbitration = t3; Settings.Save();
             }
+
+            Kino.UI.Label("  Detected: " + _contactArbiter.ContactsDetected
+                       + "    Confirmed: " + _contactArbiter.ContactsConfirmed
+                       + "    Phantom: " + _contactArbiter.ContactsPhantom
+                       + "    Timed-out: " + _contactArbiter.ContactsTimedOut);
+            Kino.UI.Label("  When active, vanilla collision physics is suppressed for");
+            Kino.UI.Label("  modded peers — all impulses come from arbitration.");
         }
     }
 }
