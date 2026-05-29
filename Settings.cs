@@ -8,13 +8,16 @@ namespace NetcodeFix
         private const string Prefix = "netcodefix_";
 
         public const float NativeSendRateHz = 60f;
-        public static float CorrectionRate = 2.5f;
+        public const float MinCorrectionRate = 0.8f;
+        public const float MaxCorrectionRate = 2.5f;
+        public const float DefaultCorrectionRate = 1.7f;
+        public static float CorrectionRate = DefaultCorrectionRate;
 
         public static void Load()
         {
-            if (!Kino.Prefs.TryGet(Prefix + "correction_rate", out CorrectionRate, 2.5f))
+            if (!Kino.Prefs.TryGet(Prefix + "correction_rate", out CorrectionRate, DefaultCorrectionRate))
             {
-                Kino.Prefs.TryGet(Prefix + "near_correction_rate", out CorrectionRate, 2.5f);
+                Kino.Prefs.TryGet(Prefix + "near_correction_rate", out CorrectionRate, DefaultCorrectionRate);
             }
 
             Clamp();
@@ -34,7 +37,7 @@ namespace NetcodeFix
 
         private static void Clamp()
         {
-            CorrectionRate = Mathf.Clamp(CorrectionRate, 0.5f, 6f);
+            CorrectionRate = Mathf.Clamp(CorrectionRate, MinCorrectionRate, MaxCorrectionRate);
         }
     }
 }

@@ -20,8 +20,10 @@ correction strength.
 - Native send-rate patch: on
 - Native send rate: 60 Hz
 - Fractional interpolation fix: on
-- Correction rate: 2.5
-- UI controls: correction slider only
+- Correction rate: 1.7
+- Correction range: 0.8-2.5
+- Main UI: debug button and players using this mod
+- Debug UI: correction slider and tuning notes
 
 ## Build
 
@@ -54,5 +56,5 @@ Upload the generated `build\release\NetcodeFix_<version>_win.zip` to a GitHub
 release. The release tag must match KSL's required format, for example:
 
 ```text
-v1.0.0
+v1.0.1
 ```

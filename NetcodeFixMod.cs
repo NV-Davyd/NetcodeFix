@@ -8,10 +8,10 @@ using UnityEngine;
 
 namespace NetcodeFix
 {
-    [KSLMeta("NetcodeFix", "1.0.0", "Envy")]
+    [KSLMeta("NetcodeFix", "1.0.1", "Envy")]
     public sealed class NetcodeFixMod : BaseMod
     {
-        internal const string Version = "1.0.0";
+        internal const string Version = "1.0.1";
 
         private static readonly Harmony Harmony = new Harmony("com.envy.carx.netcodefix");
         private static bool _patched;
@@ -22,12 +22,18 @@ namespace NetcodeFix
             {
                 Settings.Load();
                 ApplyHarmonyPatches();
+                PresenceSync.Initialize();
                 Kino.Log.Info("[NetcodeFix] Loaded v" + Version);
             }
             catch (Exception ex)
             {
                 Kino.Log.Error("[NetcodeFix] Load failed: " + ex);
             }
+        }
+
+        private void Update()
+        {
+            PresenceSync.Tick();
         }
 
         private void OnDestroy()
@@ -40,6 +46,7 @@ namespace NetcodeFix
                     _patched = false;
                 }
 
+                PresenceSync.Shutdown();
                 NativeSyncRatePatch.RestoreCurrent();
                 Settings.Save();
                 Kino.Log.Info("[NetcodeFix] Unloaded.");
@@ -57,8 +64,12 @@ namespace NetcodeFix
 
         public override void OnAdditionalAboutUIDraw()
         {
-            Kino.UI.Label("Tightens CarX remote-car sync for tandem rooms.");
-            Kino.UI.Label("Uses 60 Hz native sync, interpolation fixes, and correction tuning.");
+            Kino.UI.Label("What does this mod do?");
+            Kino.UI.Label("");
+            Kino.UI.Label("- prevents CarX's debug future-position sample from overwriting the real extrapolation state");
+            Kino.UI.Label("- fixes fractional interpolation between sync frames");
+            Kino.UI.Label("- adjusts how strongly remote cars are pulled toward their latest synced position");
+            Kino.UI.Label("- raises CarX's native realtime sync cadence within the game's multiplayer limits");
         }
 
         public override Texture2D GetIcon()
