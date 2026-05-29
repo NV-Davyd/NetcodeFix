@@ -1,7 +1,4 @@
 using System;
-using System.Reflection;
-using HarmonyLib;
-using NetcodeFix.Net;
 using SyncMultiplayer;
 using UnityEngine;
 
@@ -9,31 +6,8 @@ namespace NetcodeFix.Patches
 {
     internal static class InterpolatorPatch
     {
-        private static readonly FieldInfo F_host = AccessTools.Field(typeof(NetGameCircularInterpolator), "m_host");
-        private static readonly FieldInfo F_lastExtrapolated =
-            AccessTools.Field(typeof(NetGameCircularInterpolator), "<lastExtrapolated>k__BackingField");
-
-        public static bool GetDataFramePrefix(NetGameCircularInterpolator __instance, long modelTime, ref PosDataFrame __result)
-        {
-            if (!Settings.Enabled || !Settings.SharePosePackets) return true;
-
-            var host = F_host?.GetValue(__instance) as NetworkPlayer;
-            if (host == null || host.IsLocal) return true;
-
-            long nativeLatestTime = __instance.GetLast().modelTime;
-            if (!SharedPoseSync.TrySample(host.NetworkID, modelTime, nativeLatestTime, out __result))
-            {
-                return true;
-            }
-
-            F_lastExtrapolated?.SetValue(__instance, false);
-            return false;
-        }
-
         public static bool InterpolatePrefix(long modelTime, ref PosDataFrame left, ref PosDataFrame right, ref PosDataFrame __result)
         {
-            if (!Settings.Enabled || !Settings.FixFractionalInterpolation) return true;
-
             long span = right.modelTime - left.modelTime;
             float t = span <= 0L ? 0f : Mathf.Clamp01((float)(modelTime - left.modelTime) / span);
 

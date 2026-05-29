@@ -17,8 +17,6 @@ namespace NetcodeFix.Patches
 
         public static bool UpdatePrefix(NetGameSyncPosSystem.PosSyncInfo __instance)
         {
-            if (!Settings.Enabled) return true;
-
             if (__instance.host.IsLocal || __instance.host.userCar == null)
                 return false;
 

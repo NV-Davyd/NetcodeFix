@@ -2,31 +2,26 @@
 
 KSL mod for tightening CarX remote-car sync in tandem rooms.
 
-This version deliberately does not add custom collision arbitration. The
-primary path keeps CarX's own multiplayer packets and physics, then improves
-the places where the client sends, samples, and corrects remote cars.
+This release keeps the mod intentionally simple for normal players. The core
+fixes are always enabled and hidden; the only exposed control is remote-car
+correction strength.
 
 ## What it changes
 
-- Optionally raises CarX's native realtime pose send rate from stock timing to
-  a selected 30-60 Hz target.
+- Raises CarX's native realtime pose send rate to 60 Hz.
 - Fixes CarX's fractional interpolation path in `NetGameCircularInterpolator`.
 - Preserves the real sync sample's extrapolation flag across CarX's debug
   future-position sample.
 - Replaces remote-car correction with a configurable correction rate.
-- Includes optional KSL shared pose packets for testing, kept off by default
-  because KSL sync currently arrives at about 10 packets per second.
-- Shows native send/receive diagnostics and shared-packet diagnostics for
-  controlled lobby tests.
 
 ## Defaults
 
 - NetcodeFix: on
 - Native send-rate patch: on
-- Native send rate: 50 Hz
+- Native send rate: 60 Hz
 - Fractional interpolation fix: on
-- Shared pose packets: off
 - Correction rate: 2.5
+- UI controls: correction slider only
 
 ## Build
 
@@ -59,5 +54,5 @@ Upload the generated `build\release\NetcodeFix_<version>_win.zip` to a GitHub
 release. The release tag must match KSL's required format, for example:
 
 ```text
-v0.6.3
+v1.0.0
 ```
