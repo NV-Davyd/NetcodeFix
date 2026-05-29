@@ -17,5 +17,5 @@ Thumbs.db
 # Local runtime config
 netcodefix.json
 
-# maykr key file — never commit
+# maykr key file - never commit
 *.kmc

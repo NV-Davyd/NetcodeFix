@@ -1,90 +1,69 @@
 using System;
 using System.Reflection;
 using HarmonyLib;
-using KSL.API;
 using NetcodeFix.Net;
 using SyncMultiplayer;
 using UnityEngine;
 
 namespace NetcodeFix.Patches
 {
-    // Sanity-filters incoming PosDataFrames before they're stored in the
-    // circular interpolator buffer.
-    //
-    // Symptom this fixes: a remote car suddenly teleports 30m through a wall
-    // and the smoothing system then drags it back over a couple of seconds.
-    // The bad frame came from a corrupted packet, a wildly mis-stamped time
-    // sync, or a genuine 1-second lag spike. The interpolator has no idea
-    // it's bad and happily snaps to it.
-    //
-    // Our filter: compare the new frame's position against the most recent
-    // frame in the buffer. If the implied speed (Δpos / Δt) exceeds a sane
-    // threshold (default 80 m/s ≈ 288 km/h), drop the frame. The next valid
-    // packet will land correctly.
-    //
-    // We skip the filter on the very first frame (no prior frame to compare
-    // against) and after generation changes (respawn — the position
-    // legitimately teleports).
     internal static class InterpolatorPatch
     {
-        // Cached reflection — these private fields are hit on every incoming
-        // packet of every remote player, so avoid Traverse's per-call cost.
-        private static readonly FieldInfo F_data    = AccessTools.Field(typeof(NetGameCircularInterpolator), "m_data");
-        private static readonly FieldInfo F_current = AccessTools.Field(typeof(NetGameCircularInterpolator), "m_current");
-        private static readonly FieldInfo F_count   = AccessTools.Field(typeof(NetGameCircularInterpolator), "m_count");
+        private static readonly FieldInfo F_host = AccessTools.Field(typeof(NetGameCircularInterpolator), "m_host");
+        private static readonly FieldInfo F_lastExtrapolated =
+            AccessTools.Field(typeof(NetGameCircularInterpolator), "<lastExtrapolated>k__BackingField");
 
-        public static bool AddDataPrefix(NetGameCircularInterpolator __instance, ref PosDataFrame dataFrame)
+        public static bool GetDataFramePrefix(NetGameCircularInterpolator __instance, long modelTime, ref PosDataFrame __result)
         {
-            if (!Settings.Current.enabled) return true;
-            if (F_data == null || F_current == null || F_count == null) return true;
+            if (!Settings.Enabled || !Settings.SharePosePackets) return true;
 
-            // Trust bypass: HighRateSync sets this flag while injecting
-            // frames received from verified modded peers. Skip the sanity
-            // check for those — they come from a trusted source over a
-            // separate channel, and we don't want our own supplemental
-            // frames being filtered.
-            if (HighRateSync.IsInjectingTrusted) return true;
+            var host = F_host?.GetValue(__instance) as NetworkPlayer;
+            if (host == null || host.IsLocal) return true;
 
-            try
+            long nativeLatestTime = __instance.GetLast().modelTime;
+            if (!SharedPoseSync.TrySample(host.NetworkID, modelTime, nativeLatestTime, out __result))
             {
-                int count = (int)F_count.GetValue(__instance);
-                if (count == 0) return true; // first frame, nothing to compare
-
-                int current = (int)F_current.GetValue(__instance);
-                var buffer  = (PosDataFrame[])F_data.GetValue(__instance);
-                if (buffer == null) return true;
-
-                ref var last = ref buffer[current];
-
-                // Generation change = legitimate respawn / scene transition.
-                // Don't filter those.
-                if (last.posGeneration != dataFrame.posGeneration) return true;
-
-                long dtMs = dataFrame.modelTime - last.modelTime;
-                if (dtMs <= 0) return true; // out-of-order packet, let game's own logic handle
-
-                float dt = dtMs / 1000f;
-                Vector3 deltaPos = dataFrame.position - last.position;
-                float impliedSpeed = deltaPos.magnitude / dt;
-
-                if (impliedSpeed > Settings.Current.maxImpliedSpeedMps)
-                {
-                    Settings.Current.rejectedFramesThisSession++;
-                    // Don't add the bad frame; let the interpolator continue
-                    // extrapolating from the last good frame until a sane
-                    // packet arrives. Better than snapping to garbage.
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                // If anything goes sideways with reflection, fall back to
-                // vanilla behavior — never block the original method on
-                // our filter's errors.
-                Kino.Log.Warning("[NetcodeFix] Sanity filter error: " + ex.Message);
+                return true;
             }
 
-            return true;
+            F_lastExtrapolated?.SetValue(__instance, false);
+            return false;
+        }
+
+        public static bool InterpolatePrefix(long modelTime, ref PosDataFrame left, ref PosDataFrame right, ref PosDataFrame __result)
+        {
+            if (!Settings.Enabled || !Settings.FixFractionalInterpolation) return true;
+
+            long span = right.modelTime - left.modelTime;
+            float t = span <= 0L ? 0f : Mathf.Clamp01((float)(modelTime - left.modelTime) / span);
+
+            __result = PosDataFrame.Default;
+            __result.modelTime = Math.Min(Math.Max(modelTime, left.modelTime), right.modelTime);
+            __result.posGeneration = left.posGeneration;
+            __result.flags = left.flags;
+            __result.accelerate = Mathf.Lerp(left.accelerate, right.accelerate, t);
+            __result.gear = t < 0.5f ? left.gear : right.gear;
+            __result.brake = Mathf.Lerp(left.brake, right.brake, t);
+            __result.handbrake = Mathf.Lerp(left.handbrake, right.handbrake, t);
+            __result.flares = t < 0.5f ? left.flares : right.flares;
+            __result.steer = Mathf.Lerp(left.steer, right.steer, t);
+            __result.clutch = Mathf.Lerp(left.clutch, right.clutch, t);
+            __result.autoClutch = t < 0.5f ? left.autoClutch : right.autoClutch;
+            __result.clutchKick = t < 0.5f ? left.clutchKick : right.clutchKick;
+            __result.rpm = Mathf.Lerp(left.rpm, right.rpm, t);
+            __result.mileage = Mathf.Lerp(left.mileage, right.mileage, t);
+            __result.velocity = Vector3.Lerp(left.velocity, right.velocity, t);
+            __result.angularVelocity = Vector3.Lerp(left.angularVelocity, right.angularVelocity, t);
+            __result.position = Vector3.Lerp(left.position, right.position, t);
+            __result.rotation = Quaternion.Lerp(left.rotation, right.rotation, t);
+            __result.angAccel = Mathf.Lerp(left.angAccel, right.angAccel, t);
+            __result.longAccel = Mathf.Lerp(left.longAccel, right.longAccel, t);
+            __result.sideAccel = Mathf.Lerp(left.sideAccel, right.sideAccel, t);
+            __result.processEngineStart = t < 0.5f ? left.processEngineStart : right.processEngineStart;
+            __result.ignitionEnabled = t < 0.5f ? left.ignitionEnabled : right.ignitionEnabled;
+            __result.starterEnabled = t < 0.5f ? left.starterEnabled : right.starterEnabled;
+            __result.engineStartTime = Mathf.Lerp(left.engineStartTime, right.engineStartTime, t);
+            return false;
         }
     }
 }

@@ -1,57 +1,63 @@
 # NetcodeFix
 
-A KSL mod that **patches CarX Drift Racing Online's multiplayer netcode** for tighter close-quarters racing — tandem drifts, door-to-door passes, busy rooms.
+KSL mod for tightening CarX remote-car sync in tandem rooms.
 
-Not a server-side fix (we don't control SmartFox). Client-side Harmony patches that operate at three tiers:
+This version deliberately does not add custom collision arbitration. The
+primary path keeps CarX's own multiplayer packets and physics, then improves
+the places where the client sends, samples, and corrects remote cars.
 
-- **Tier 1 — universal** (works against vanilla peers). Local-only mitigations: adaptive smoothing, smart snap threshold, sanity filter for impossible packet deltas.
-- **Tier 2 — modded room** (activates when every peer also runs NetcodeFix). Input-history broadcast over `Kino.Sync`, higher local upload rate. *Status: pending.*
-- **Tier 3 — modded room with arbitration** (the iRacing-style trick at the peer-coordination level). When two clients disagree about a contact, they exchange assertion packets and apply a deterministic, identical impulse on both sides. *Status: pending.*
+## What it changes
 
-A built-in **peer-presence handshake** (à la NoDynCollisions) advertises capability flags between modded clients so Tier 2/3 light up automatically when the room qualifies and drop back to Tier 1 the moment a vanilla player joins.
+- Optionally raises CarX's native realtime pose send rate from stock timing to
+  a selected 30-60 Hz target.
+- Fixes CarX's fractional interpolation path in `NetGameCircularInterpolator`.
+- Preserves the real sync sample's extrapolation flag across CarX's debug
+  future-position sample.
+- Replaces remote-car correction with a configurable correction rate.
+- Includes optional KSL shared pose packets for testing, kept off by default
+  because KSL sync currently arrives at about 10 packets per second.
+- Shows native send/receive diagnostics and shared-packet diagnostics for
+  controlled lobby tests.
 
-## Tier 1 in detail
+## Defaults
 
-### Adaptive smoothing + smart snap
-CarX's vanilla `PosSyncInfo.Update` smooths remote position error at 1 m/s forward / 2 m/s side (rates scale with error magnitude) and snap-resets only above 6m total error. In practice this means a 3m error takes ~1.5s to bleed off — visibly trailing the truth — and a 5m lag spike slow-oozes for several seconds before tripping the snap. NetcodeFix:
-- Bumps the smoothing rate multiplier (default 2×, configurable).
-- Lowers the snap threshold (default 3m, configurable). Above the threshold, apply the entire residual in one frame — looks like a small discrete jump rather than a slow ooze.
-- Rotation smoothing scales with the same multiplier.
-
-### Sanity filter
-Vanilla code feeds every received packet into the interpolator buffer unchecked. A corrupted, mis-timestamped, or massively-delayed packet lands at an impossible position, the interpolator happily snaps to it, then the smoothing system spends seconds dragging the car back. We reject any frame whose implied speed (Δpos / Δt vs. previous buffer entry) exceeds a sane threshold (default 80 m/s ≈ 288 km/h). Generation changes (respawn) are excluded.
+- NetcodeFix: on
+- Native send-rate patch: on
+- Native send rate: 50 Hz
+- Fractional interpolation fix: on
+- Shared pose packets: off
+- Correction rate: 2.5
 
 ## Build
 
-```sh
-dotnet build -c Release
+```powershell
+dotnet build .\NetcodeFix.KSL.csproj -c Release
 ```
 
-Output: `bin/Release/net48/NetcodeFix.dll`.
+Output: `bin\Release\net48\NetcodeFix.dll`.
 
-To pack as `.ksm` (required for KSL to load the mod): use `maykr.exe` from the KSL SDK with your developer key — see [KSL docs](https://github.com/trbflxr/ksl/blob/master/doc/guide/dev/developer_rights.md).
+## Package
 
-## Settings
+Export the Maykr key as `NetcodeFix_maykr.kmc`, then run:
 
-UI lives in the KSL mod-settings page (open KSL → NetcodeFix). Configurable:
+```powershell
+.\build_ksm.ps1
+```
 
-- Master enable / kill switch.
-- Smoothing rate × (0.5 – 5.0)
-- Snap threshold m (1 – 10)
-- Sanity reject threshold m/s (40 – 200)
-- Tier 2 / 3 stub toggles (pending implementation)
+## KSL updater release
 
-Persisted to `netcodefix.json` next to the DLL.
+Register this as a KSL `PublicMod` named `NetcodeFix`, link the public GitHub
+repository in KSL dev tools, and set the updater type to `Automatic`.
 
-## Roadmap
+Create the release archive with:
 
-- [x] Tier 1: adaptive smoothing + smart snap
-- [x] Tier 1: sanity filter
-- [x] Peer presence handshake with capability flags
-- [ ] Tier 2: input-history broadcast + replay-based extrapolation
-- [ ] Tier 2: 50Hz local upload-rate boost (in modded rooms only)
-- [ ] Tier 3: contact arbitration protocol
+```powershell
+.\build_release.ps1 -KeyPath "D:\SteamLibrary\steamapps\common\CarX Drift Racing Online\kino\dev\NetcodeFix_maykr.kmc"
+```
 
-## Credit
+Upload the generated `build\release\NetcodeFix_<version>_win.zip` to a GitHub
+release. The release tag must match KSL's required format, for example:
 
-Mod-loading and presence-pattern conventions follow [NoDynamicCollisions](../NoDynamicCollisions.KSL) by Envy. Built on the KSL SDK by trbflxr.
+```text
+v0.6.2
+```
