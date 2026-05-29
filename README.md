@@ -59,5 +59,5 @@ Upload the generated `build\release\NetcodeFix_<version>_win.zip` to a GitHub
 release. The release tag must match KSL's required format, for example:
 
 ```text
-v0.6.2
+v0.6.3
 ```
