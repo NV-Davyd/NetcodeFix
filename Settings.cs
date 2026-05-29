@@ -6,6 +6,7 @@ namespace NetcodeFix
     public static class Settings
     {
         private const string Prefix = "netcodefix_";
+        private const int CurrentSettingsVersion = 2;
 
         public const float NativeSendRateHz = 60f;
         public const float MinCorrectionRate = 0.8f;
@@ -15,7 +16,12 @@ namespace NetcodeFix
 
         public static void Load()
         {
-            if (!Kino.Prefs.TryGet(Prefix + "correction_rate", out CorrectionRate, DefaultCorrectionRate))
+            bool hasSettingsVersion = Kino.Prefs.TryGet(Prefix + "settings_version", out int settingsVersion, 0);
+            if (!hasSettingsVersion || settingsVersion < CurrentSettingsVersion)
+            {
+                CorrectionRate = DefaultCorrectionRate;
+            }
+            else if (!Kino.Prefs.TryGet(Prefix + "correction_rate", out CorrectionRate, DefaultCorrectionRate))
             {
                 Kino.Prefs.TryGet(Prefix + "near_correction_rate", out CorrectionRate, DefaultCorrectionRate);
             }
@@ -33,6 +39,7 @@ namespace NetcodeFix
             Kino.Prefs.Set(Prefix + "share_pose_packets", false);
             Kino.Prefs.Set(Prefix + "fix_fractional_interpolation", true);
             Kino.Prefs.Set(Prefix + "correction_rate", CorrectionRate);
+            Kino.Prefs.Set(Prefix + "settings_version", CurrentSettingsVersion);
         }
 
         private static void Clamp()

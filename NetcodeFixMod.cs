@@ -8,10 +8,10 @@ using UnityEngine;
 
 namespace NetcodeFix
 {
-    [KSLMeta("NetcodeFix", "1.0.1", "Envy")]
+    [KSLMeta("NetcodeFix", "1.0.2", "Envy")]
     public sealed class NetcodeFixMod : BaseMod
     {
-        internal const string Version = "1.0.1";
+        internal const string Version = "1.0.2";
 
         private static readonly Harmony Harmony = new Harmony("com.envy.carx.netcodefix");
         private static bool _patched;
