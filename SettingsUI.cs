@@ -25,20 +25,41 @@ namespace NetcodeFix
 
         private static void DrawDebug()
         {
-            float correctionRate = Settings.CorrectionRate;
-            if (Kino.UI.Slider(
-                ref correctionRate,
-                Settings.MinCorrectionRate,
-                Settings.MaxCorrectionRate,
-                $"Correction rate: {Settings.CorrectionRate:F2}"))
+            bool drawSyncOverlay = Settings.DrawSyncOverlay;
+            if (Kino.UI.Toggle("Draw sync correction boxes", ref drawSyncOverlay))
             {
-                Settings.CorrectionRate = correctionRate;
+                Settings.DrawSyncOverlay = drawSyncOverlay;
                 Settings.Save();
             }
 
-            Kino.UI.Label("Higher correction reduces visible offset but can make remote cars look more jittery.");
-            Kino.UI.Label("Lower correction looks smoother, but remote cars can stay farther from their latest synced position.");
-            Kino.UI.Label("If the room has high or unstable ping, use less correction. Stock CarX is close to 1.00.");
+            Kino.UI.Label("Blue: synchronized target. Green: locally simulated remote car. Cyan: pending correction.");
+
+            bool manualCorrectionTuning = Settings.ManualCorrectionTuning;
+            if (Kino.UI.Toggle("Manual correction tuning", ref manualCorrectionTuning))
+            {
+                Settings.ManualCorrectionTuning = manualCorrectionTuning;
+                Settings.Save();
+            }
+
+            if (Settings.ManualCorrectionTuning)
+            {
+                float correctionRate = Settings.CorrectionRate;
+                if (Kino.UI.Slider(
+                    ref correctionRate,
+                    Settings.MinCorrectionRate,
+                    Settings.MaxCorrectionRate,
+                    $"Base correction rate: {Settings.CorrectionRate:F2}"))
+                {
+                    Settings.CorrectionRate = correctionRate;
+                    Settings.Save();
+                }
+
+                Kino.UI.Label("Expert override. Higher values react faster but can add jitter and fight contact physics.");
+            }
+            else
+            {
+                Kino.UI.Label("Automatic correction is active. Base rate: 1.00.");
+            }
         }
     }
 }

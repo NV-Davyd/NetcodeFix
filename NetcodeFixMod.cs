@@ -8,10 +8,10 @@ using UnityEngine;
 
 namespace NetcodeFix
 {
-    [KSLMeta("NetcodeFix", "1.0.4", "Envy")]
+    [KSLMeta("NetcodeFix", "1.1.0", "Envy")]
     public sealed class NetcodeFixMod : BaseMod
     {
-        internal const string Version = "1.0.4";
+        internal const string Version = "1.1.0";
 
         private static readonly Harmony Harmony = new Harmony("com.envy.carx.netcodefix");
         private static bool _patched;
@@ -21,6 +21,7 @@ namespace NetcodeFix
             try
             {
                 Settings.Load();
+                SyncCorrectionOverlay.Initialize();
                 ApplyHarmonyPatches();
                 PresenceSync.Initialize();
                 Kino.Log.Info("[NetcodeFix] Loaded v" + Version);
@@ -34,6 +35,7 @@ namespace NetcodeFix
         private void Update()
         {
             PresenceSync.Tick();
+            SyncCorrectionOverlay.Tick();
         }
 
         private void OnDestroy()
@@ -47,6 +49,7 @@ namespace NetcodeFix
                 }
 
                 PresenceSync.Shutdown();
+                SyncCorrectionOverlay.Shutdown();
                 NativeSyncRatePatch.RestoreCurrent();
                 Settings.Save();
                 Kino.Log.Info("[NetcodeFix] Unloaded.");
@@ -84,6 +87,14 @@ namespace NetcodeFix
             Harmony.Patch(
                 AccessTools.Method(typeof(NetGameCircularInterpolator), "Interpolate"),
                 prefix: new HarmonyMethod(typeof(InterpolatorPatch), nameof(InterpolatorPatch.InterpolatePrefix)));
+
+            Harmony.Patch(
+                AccessTools.Method(typeof(NetGameCircularInterpolator), "Extrapolate"),
+                postfix: new HarmonyMethod(typeof(InterpolatorPatch), nameof(InterpolatorPatch.ExtrapolatePostfix)));
+
+            Harmony.Patch(
+                AccessTools.Method(typeof(NetGameCircularInterpolator), "ExtrapolateLast"),
+                prefix: new HarmonyMethod(typeof(StaleExtrapolationPatch), nameof(StaleExtrapolationPatch.ExtrapolateLastPrefix)));
 
             Harmony.Patch(
                 AccessTools.Method(typeof(NetGameSyncPosSystem.PosSyncInfo), "Update"),

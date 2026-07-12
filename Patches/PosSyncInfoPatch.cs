@@ -10,8 +10,16 @@ namespace NetcodeFix.Patches
 {
     internal static class PosSyncInfoPatch
     {
+        private const float RecoveryStartErrorM = 0.35f;
+        private const float FullRecoveryErrorM = 3f;
+        private const float MaxRecoveryRateMultiplier = 4f;
+        private const float MaxRecoverySpeedMps = 18f;
+        private const float TeleportThresholdM = 30f;
+
         private static readonly FieldInfo F_lastExtrapolated =
             AccessTools.Field(typeof(NetGameCircularInterpolator), "<lastExtrapolated>k__BackingField");
+        private static readonly FieldInfo F_syncTime =
+            AccessTools.Field(typeof(NetGameSyncPosSystem), "m_syncTime");
 
         public static bool UpdatePrefix(NetGameSyncPosSystem.PosSyncInfo __instance)
         {
@@ -24,18 +32,64 @@ namespace NetcodeFix.Patches
             Rigidbody rb = carX.getRigidbody;
             if (rb == null) return false;
 
+            SyncCorrectionOverlay.Capture(__instance, carX, rb);
+
             float dt = Time.deltaTime;
+            Vector3 totalError = __instance.fwdPosError + __instance.sidePosError;
+            float errorMagnitude = totalError.magnitude;
+
+            if (errorMagnitude >= TeleportThresholdM)
+            {
+                Quaternion targetRotation = rb.rotation * __instance.syncRotError;
+                rb.position += totalError;
+                if (!IsRotationNaN(targetRotation))
+                {
+                    rb.rotation = targetRotation;
+                }
+
+                __instance.fwdPosError = Vector3.zero;
+                __instance.sidePosError = Vector3.zero;
+                __instance.syncRotError = Quaternion.identity;
+                return false;
+            }
+
+            float recovery = Mathf.SmoothStep(
+                0f,
+                1f,
+                Mathf.InverseLerp(RecoveryStartErrorM, FullRecoveryErrorM, errorMagnitude));
+            float trajectoryAssist = Mathf.SmoothStep(
+                0f,
+                1f,
+                Mathf.InverseLerp(0.05f, 2f, errorMagnitude));
+
+            ApplyTrajectoryAssist(__instance, rb, trajectoryAssist, dt);
+
             float steer = carX.GetSteer();
-            carX.SetSteer(Mathf.Lerp(steer, __instance.syncSteer, dt * 10f), false, dt);
+            float steerRate = Mathf.Lerp(10f, 35f, recovery);
+            float steerResponse = 1f - Mathf.Exp(-steerRate * dt);
+            carX.SetSteer(Mathf.Lerp(steer, __instance.syncSteer, steerResponse), false, dt);
 
-            float rateMul = Mathf.Max(0.1f, Settings.CorrectionRate);
-            float sideMag = __instance.sidePosError.magnitude;
-            float fwdMag = __instance.fwdPosError.magnitude;
+            float rateMul = Mathf.Max(0.1f, Settings.EffectiveCorrectionRate);
+            float adaptiveRate = rateMul * Mathf.Lerp(1f, MaxRecoveryRateMultiplier, recovery);
+            float sideResponse = 1f - Mathf.Exp(-2f * adaptiveRate * dt);
+            float fwdResponse = 1f - Mathf.Exp(-adaptiveRate * dt);
 
-            Vector3 sideCorr = Vector3.MoveTowards(Vector3.zero, __instance.sidePosError, 2f * rateMul * dt * sideMag);
-            Vector3 fwdCorr = Vector3.MoveTowards(Vector3.zero, __instance.fwdPosError, 1f * rateMul * dt * fwdMag);
+            Vector3 sideCorr = __instance.sidePosError * sideResponse;
+            Vector3 fwdCorr = __instance.fwdPosError * fwdResponse;
             Vector3 deltaPos = sideCorr + fwdCorr;
-            Quaternion deltaRot = Quaternion.Lerp(Quaternion.identity, __instance.syncRotError, 6f * rateMul * dt);
+
+            float maxStep = Mathf.Lerp(5f, MaxRecoverySpeedMps, recovery) * dt;
+            if (deltaPos.magnitude > maxStep && deltaPos.sqrMagnitude > Mathf.Epsilon)
+            {
+                float scale = maxStep / deltaPos.magnitude;
+                sideCorr *= scale;
+                fwdCorr *= scale;
+                deltaPos = sideCorr + fwdCorr;
+            }
+
+            float rotationRate = Mathf.Min(20f, 6f * rateMul * Mathf.Lerp(1f, 2.5f, recovery));
+            float rotationResponse = 1f - Mathf.Exp(-rotationRate * dt);
+            Quaternion deltaRot = Quaternion.Lerp(Quaternion.identity, __instance.syncRotError, rotationResponse);
 
             __instance.fwdPosError -= fwdCorr;
             __instance.sidePosError -= sideCorr;
@@ -50,6 +104,79 @@ namespace NetcodeFix.Patches
             return false;
         }
 
+        private static void ApplyTrajectoryAssist(
+            NetGameSyncPosSystem.PosSyncInfo syncInfo,
+            Rigidbody rigidbody,
+            float recovery,
+            float dt)
+        {
+            if (recovery <= 0f
+                || syncInfo.interpolator == null
+                || PreciseTime.fixedUnscaledTimeMs < syncInfo.lockedByCollision)
+            {
+                return;
+            }
+
+            NetGameSyncTimeSystem syncTime = F_syncTime?.GetValue(null) as NetGameSyncTimeSystem;
+            if (syncTime == null)
+            {
+                return;
+            }
+
+            bool previousExtrapolated = syncInfo.interpolator.lastExtrapolated;
+            PosDataFrame targetFrame;
+            try
+            {
+                targetFrame = syncInfo.interpolator.GetDataFrame(syncTime.GetModelFixedTimeMs());
+            }
+            finally
+            {
+                F_lastExtrapolated?.SetValue(syncInfo.interpolator, previousExtrapolated);
+            }
+
+            if (!targetFrame.IsValid()
+                || targetFrame.IsFlaged(DataFrameFlags.Inactive)
+                || targetFrame.IsFlaged(DataFrameFlags.Finished)
+                || targetFrame.posGeneration != syncInfo.syncGeneration)
+            {
+                return;
+            }
+
+            float velocityResponse = 1f - Mathf.Exp(-12f * recovery * dt);
+            float angularResponse = 1f - Mathf.Exp(-16f * recovery * dt);
+            rigidbody.velocity = Vector3.Lerp(rigidbody.velocity, targetFrame.velocity, velocityResponse);
+            rigidbody.angularVelocity = Vector3.Lerp(
+                rigidbody.angularVelocity,
+                targetFrame.angularVelocity,
+                angularResponse);
+        }
+
+        public static void ApplyNetworkVelocity(Rigidbody rigidbody, Vector3 targetVelocity)
+        {
+            if (rigidbody == null || !IsFinite(targetVelocity))
+            {
+                return;
+            }
+
+            float difference = (targetVelocity - rigidbody.velocity).magnitude;
+            float rate = Mathf.Lerp(18f, 40f, Mathf.InverseLerp(0.5f, 10f, difference));
+            float response = 1f - Mathf.Exp(-rate * Time.fixedDeltaTime);
+            rigidbody.velocity = Vector3.Lerp(rigidbody.velocity, targetVelocity, response);
+        }
+
+        public static void ApplyNetworkAngularVelocity(Rigidbody rigidbody, Vector3 targetAngularVelocity)
+        {
+            if (rigidbody == null || !IsFinite(targetAngularVelocity))
+            {
+                return;
+            }
+
+            float difference = (targetAngularVelocity - rigidbody.angularVelocity).magnitude;
+            float rate = Mathf.Lerp(20f, 45f, Mathf.InverseLerp(0.2f, 5f, difference));
+            float response = 1f - Mathf.Exp(-rate * Time.fixedDeltaTime);
+            rigidbody.angularVelocity = Vector3.Lerp(rigidbody.angularVelocity, targetAngularVelocity, response);
+        }
+
         public static IEnumerable<CodeInstruction> SyncTranspiler(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
             List<CodeInstruction> code = new List<CodeInstruction>(instructions);
@@ -58,6 +185,10 @@ namespace NetcodeFix.Patches
             MethodInfo getDataFrame = AccessTools.Method(typeof(NetGameCircularInterpolator), nameof(NetGameCircularInterpolator.GetDataFrame));
             MethodInfo getLastExtrapolated = AccessTools.PropertyGetter(typeof(NetGameCircularInterpolator), nameof(NetGameCircularInterpolator.lastExtrapolated));
             MethodInfo restore = AccessTools.Method(typeof(PosSyncInfoPatch), nameof(RestoreActualExtrapolatedState));
+            MethodInfo setVelocity = AccessTools.PropertySetter(typeof(Rigidbody), nameof(Rigidbody.velocity));
+            MethodInfo setAngularVelocity = AccessTools.PropertySetter(typeof(Rigidbody), nameof(Rigidbody.angularVelocity));
+            MethodInfo applyVelocity = AccessTools.Method(typeof(PosSyncInfoPatch), nameof(ApplyNetworkVelocity));
+            MethodInfo applyAngularVelocity = AccessTools.Method(typeof(PosSyncInfoPatch), nameof(ApplyNetworkAngularVelocity));
             FieldInfo interpolatorField = AccessTools.Field(typeof(NetGameSyncPosSystem.PosSyncInfo), nameof(NetGameSyncPosSystem.PosSyncInfo.interpolator));
             FieldInfo debugPositionField = AccessTools.Field(typeof(NetGameSyncPosSystem.PosSyncInfo), "m_debugSyncPosition");
 
@@ -68,6 +199,18 @@ namespace NetcodeFix.Patches
             for (int i = 0; i < code.Count; i++)
             {
                 CodeInstruction instruction = code[i];
+
+                if (instruction.Calls(setVelocity))
+                {
+                    instruction.opcode = OpCodes.Call;
+                    instruction.operand = applyVelocity;
+                }
+                else if (instruction.Calls(setAngularVelocity))
+                {
+                    instruction.opcode = OpCodes.Call;
+                    instruction.operand = applyAngularVelocity;
+                }
+
                 yield return instruction;
 
                 if (instruction.Calls(getDataFrame))
@@ -116,6 +259,13 @@ namespace NetcodeFix.Patches
             return float.IsNaN(q.x) || float.IsNaN(q.y) || float.IsNaN(q.z) || float.IsNaN(q.w)
                 || float.IsInfinity(q.x) || float.IsInfinity(q.y)
                 || float.IsInfinity(q.z) || float.IsInfinity(q.w);
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return !float.IsNaN(value.x) && !float.IsInfinity(value.x)
+                && !float.IsNaN(value.y) && !float.IsInfinity(value.y)
+                && !float.IsNaN(value.z) && !float.IsInfinity(value.z);
         }
 
         private static bool IsStoreLocal(CodeInstruction instruction)
