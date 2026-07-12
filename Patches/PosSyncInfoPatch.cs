@@ -10,8 +10,6 @@ namespace NetcodeFix.Patches
 {
     internal static class PosSyncInfoPatch
     {
-        private const float SnapThresholdM = 3.25f;
-
         private static readonly FieldInfo F_lastExtrapolated =
             AccessTools.Field(typeof(NetGameCircularInterpolator), "<lastExtrapolated>k__BackingField");
 
@@ -31,35 +29,17 @@ namespace NetcodeFix.Patches
             carX.SetSteer(Mathf.Lerp(steer, __instance.syncSteer, dt * 10f), false, dt);
 
             float rateMul = Mathf.Max(0.1f, Settings.CorrectionRate);
-            float snapAt = Mathf.Max(0.5f, SnapThresholdM);
-
             float sideMag = __instance.sidePosError.magnitude;
             float fwdMag = __instance.fwdPosError.magnitude;
-            float totalMag = sideMag + fwdMag;
 
-            Vector3 deltaPos;
-            Quaternion deltaRot;
+            Vector3 sideCorr = Vector3.MoveTowards(Vector3.zero, __instance.sidePosError, 2f * rateMul * dt * sideMag);
+            Vector3 fwdCorr = Vector3.MoveTowards(Vector3.zero, __instance.fwdPosError, 1f * rateMul * dt * fwdMag);
+            Vector3 deltaPos = sideCorr + fwdCorr;
+            Quaternion deltaRot = Quaternion.Lerp(Quaternion.identity, __instance.syncRotError, 6f * rateMul * dt);
 
-            if (totalMag > snapAt)
-            {
-                deltaPos = __instance.fwdPosError + __instance.sidePosError;
-                deltaRot = __instance.syncRotError;
-                __instance.fwdPosError = Vector3.zero;
-                __instance.sidePosError = Vector3.zero;
-                __instance.syncRotError = Quaternion.identity;
-            }
-            else
-            {
-                Vector3 sideCorr = Vector3.MoveTowards(Vector3.zero, __instance.sidePosError, 2f * rateMul * dt * sideMag);
-                Vector3 fwdCorr = Vector3.MoveTowards(Vector3.zero, __instance.fwdPosError, 1f * rateMul * dt * fwdMag);
-
-                deltaPos = sideCorr + fwdCorr;
-                deltaRot = Quaternion.Lerp(Quaternion.identity, __instance.syncRotError, 6f * rateMul * dt);
-
-                __instance.fwdPosError -= fwdCorr;
-                __instance.sidePosError -= sideCorr;
-                __instance.syncRotError *= Quaternion.Inverse(deltaRot);
-            }
+            __instance.fwdPosError -= fwdCorr;
+            __instance.sidePosError -= sideCorr;
+            __instance.syncRotError *= Quaternion.Inverse(deltaRot);
 
             rb.MovePosition(rb.position + deltaPos);
 
